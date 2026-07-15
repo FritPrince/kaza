@@ -25,6 +25,10 @@ coverage/
 *.tsbuildinfo
 pnpm-lock.yaml.*
 
+# Benchmark: real user photos and generated renders stay local (privacy, §7.5)
+tools/geometry-benchmark/photos/
+tools/geometry-benchmark/results/
+
 # OS / IDE
 .DS_Store
 Thumbs.db
