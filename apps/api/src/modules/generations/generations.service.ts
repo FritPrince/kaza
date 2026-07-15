@@ -9,6 +9,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import type { AgentTurn, RequestGenerationInput } from '@kaza/shared';
 import { PrismaService } from '../../prisma/prisma.service';
+import { StorageService } from '../storage/storage.service';
 import { InterviewAgentService } from './agent/interview-agent.service';
 import { GENERATION_QUEUE } from './generations.module';
 
@@ -21,6 +22,7 @@ export class GenerationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly interviewAgent: InterviewAgentService,
+    private readonly storage: StorageService,
     @InjectQueue(GENERATION_QUEUE) private readonly queue: Queue<GenerationJobData>,
   ) {}
 
@@ -123,15 +125,26 @@ export class GenerationsService {
       throw new ForbiddenException('Not your generation');
     }
     const { room: _room, ...payload } = generation;
-    return payload;
+    return {
+      ...payload,
+      imageUrl: payload.imageKey ? await this.storage.getDownloadUrl(payload.imageKey) : null,
+    };
   }
 
   async listRoomGenerations(userId: string, roomId: string) {
     await this.getOwnedRoom(userId, roomId);
-    return this.prisma.generation.findMany({
+    const generations = await this.prisma.generation.findMany({
       where: { roomId },
       orderBy: { version: 'asc' },
     });
+    return Promise.all(
+      generations.map(async (generation) => ({
+        ...generation,
+        imageUrl: generation.imageKey
+          ? await this.storage.getDownloadUrl(generation.imageKey)
+          : null,
+      })),
+    );
   }
 
   private async getOwnedRoom(userId: string, roomId: string) {

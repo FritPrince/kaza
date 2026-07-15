@@ -27,6 +27,11 @@ export const updateProfileSchema = z.object({
 });
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
 
+export const registerPushTokenSchema = z.object({
+  expoPushToken: z.string().min(1).max(200),
+});
+export type RegisterPushTokenInput = z.infer<typeof registerPushTokenSchema>;
+
 /** Taste quiz swipe: one image liked or disliked (§A2). */
 export const tasteSwipeSchema = z.object({
   imageId: idSchema,

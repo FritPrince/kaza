@@ -75,9 +75,10 @@ model User {
   language     String           @default("fr")
   country      String?          @db.Char(2)
   currency     String           @default("XOF")
-  credits      Int              @default(3)
-  plan         SubscriptionPlan @default(free)
-  suspendedAt  DateTime?
+  credits       Int              @default(3)
+  plan          SubscriptionPlan @default(free)
+  expoPushToken String?
+  suspendedAt   DateTime?
   createdAt    DateTime         @default(now())
   updatedAt    DateTime         @updatedAt
 

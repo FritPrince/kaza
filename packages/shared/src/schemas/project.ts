@@ -47,6 +47,18 @@ export const roomSchema = z.object({
 });
 export type Room = z.infer<typeof roomSchema>;
 
+/** Step 1 of the photo flow: ask for a signed upload URL (B1). */
+export const requestPhotoUploadSchema = z.object({
+  contentType: z.enum(['image/jpeg', 'image/png']),
+});
+export type RequestPhotoUploadInput = z.infer<typeof requestPhotoUploadSchema>;
+
+/** Step 2: confirm the client finished uploading to the signed URL. */
+export const confirmRoomPhotoSchema = z.object({
+  key: z.string().min(1).max(300),
+});
+export type ConfirmRoomPhotoInput = z.infer<typeof confirmRoomPhotoSchema>;
+
 export const createRoomSchema = z.object({
   type: z.enum(ROOM_TYPES),
   name: z.string().min(1).max(80),

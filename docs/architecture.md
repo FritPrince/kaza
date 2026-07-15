@@ -64,10 +64,27 @@ une seule source de vérité pour les contrats (§7.3).
 ## À faire (prochaines étapes)
 
 1. **Sprint de validation §12** : benchmark ControlNet vs Gemini sur 30 photos
-   réelles → implémentation du `ImageProvider` retenu.
-2. Upload S3 avec URLs signées (endpoint `POST /rooms/:id/photo`).
-3. Notifications push Expo à la fin des générations.
-4. 2FA TOTP (otplib) + enrôlement dans le back-office.
-5. Intégrations FedaPay/KkiaPay réelles + vérification HMAC des webhooks.
-6. Modération des images uploadées avant traitement (§7.5).
-7. CI/CD (GitHub Actions) : lint + typecheck + tests + build Docker.
+   réelles. Les deux providers sont implémentés ; renseigner
+   `REPLICATE_MODEL_VERSION` (obligatoire) ou `GEMINI_API_KEY` + basculer via
+   `IMAGE_PROVIDER`.
+2. Intégrations FedaPay/KkiaPay réelles + vérification HMAC des webhooks.
+3. Modération des images uploadées avant traitement (§7.5) — brancher sur
+   `confirmRoomPhoto`.
+4. Export PDF du dossier projet (D2) et partage WhatsApp (D3).
+5. Liste d'achats IA à partir d'un rendu (D1).
+6. Écran d'enrôlement 2FA dans le back-office (l'API est prête :
+   `POST /admin/auth/2fa/setup` + `/enable`).
+7. Tests automatisés (charte §7) : unitaires services critiques (crédits,
+   webhooks idempotents), e2e auth.
+
+## Fait (sprint 2)
+
+- Stockage S3/R2 signé : upload direct mobile → bucket, clés privées, URLs GET
+  limitées dans toutes les réponses.
+- `ReplicateImageProvider` (ControlNet depth, polling, coût par run) et
+  `GeminiImageProvider` (image editing inline) opérationnels.
+- Notifications push Expo (succès + échec remboursé), token enregistré via
+  `PUT /users/me/push-token`.
+- 2FA TOTP complet côté API (otplib) : setup → enable → enforcement au login.
+- Mobile : capture avec guide de cadrage, compression 1080p, upload signé,
+  écran d'attente avec messages tournants, comparateur avant/après branché.

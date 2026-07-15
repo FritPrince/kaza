@@ -3,6 +3,7 @@ import { Inject, Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
 import { structuredPromptSchema } from '@kaza/shared';
 import { PrismaService } from '../../prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { GENERATION_QUEUE } from './generations.module';
 import type { GenerationJobData } from './generations.service';
 import { IMAGE_PROVIDER, type ImageProvider } from './providers/image-provider.interface';
@@ -14,6 +15,7 @@ export class GenerationProcessor extends WorkerHost {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly notifications: NotificationsService,
     @Inject(IMAGE_PROVIDER) private readonly imageProvider: ImageProvider,
   ) {
     super();
@@ -23,7 +25,7 @@ export class GenerationProcessor extends WorkerHost {
     const { generationId } = job.data;
     const generation = await this.prisma.generation.findUniqueOrThrow({
       where: { id: generationId },
-      include: { room: true },
+      include: { room: { include: { project: { select: { userId: true } } } } },
     });
 
     await this.prisma.generation.update({
@@ -46,7 +48,12 @@ export class GenerationProcessor extends WorkerHost {
           completedAt: new Date(),
         },
       });
-      // TODO: send Expo push notification "your render is ready" (§7.2).
+      await this.notifications.notifyUser(
+        generation.room.project.userId,
+        'Votre rendu est prêt ✦',
+        `${generation.room.name} — version ${generation.version} générée.`,
+        { generationId, roomId: generation.roomId },
+      );
     } catch (error) {
       const isLastAttempt = job.attemptsMade + 1 >= (job.opts.attempts ?? 1);
       if (isLastAttempt) {
@@ -71,5 +78,11 @@ export class GenerationProcessor extends WorkerHost {
       where: { id: generation.room.project.userId },
       data: { credits: { increment: 1 } },
     });
+    await this.notifications.notifyUser(
+      generation.room.project.userId,
+      'Génération impossible',
+      'Votre crédit a été remboursé. Réessayez dans quelques instants.',
+      { generationId, roomId: generation.roomId },
+    );
   }
 }

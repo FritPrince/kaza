@@ -59,6 +59,11 @@ export class UsersService {
     return profile;
   }
 
+  async registerPushToken(userId: string, expoPushToken: string) {
+    await this.prisma.user.update({ where: { id: userId }, data: { expoPushToken } });
+    return { registered: true };
+  }
+
   /** GDPR: cascading delete removes projects, generations, conversations and tokens. */
   async deleteAccount(userId: string) {
     await this.prisma.user.delete({ where: { id: userId } });

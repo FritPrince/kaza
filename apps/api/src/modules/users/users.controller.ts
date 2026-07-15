@@ -1,8 +1,10 @@
 import { Body, Controller, Delete, Get, Patch, Put, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
+  registerPushTokenSchema,
   submitTasteQuizSchema,
   updateProfileSchema,
+  type RegisterPushTokenInput,
   type SubmitTasteQuizInput,
   type UpdateProfileInput,
 } from '@kaza/shared';
@@ -46,6 +48,15 @@ export class UsersController {
   @ApiOperation({ summary: 'Current taste profile (A3)' })
   getTasteProfile(@CurrentUserId() userId: string) {
     return this.usersService.getTasteProfile(userId);
+  }
+
+  @Put('me/push-token')
+  @ApiOperation({ summary: 'Register the Expo push token for generation notifications' })
+  registerPushToken(
+    @CurrentUserId() userId: string,
+    @Body(new ZodValidationPipe(registerPushTokenSchema)) input: RegisterPushTokenInput,
+  ) {
+    return this.usersService.registerPushToken(userId, input.expoPushToken);
   }
 
   @Delete('me')

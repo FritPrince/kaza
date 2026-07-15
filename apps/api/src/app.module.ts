@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
 import { PrismaModule } from './prisma/prisma.module';
+import { StorageModule } from './modules/storage/storage.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { ProjectsModule } from './modules/projects/projects.module';
@@ -17,6 +19,8 @@ import { validateEnv } from './config/env.validation';
       connection: { url: process.env.REDIS_URL ?? 'redis://localhost:6379' },
     }),
     PrismaModule,
+    StorageModule,
+    NotificationsModule,
     AuthModule,
     UsersModule,
     ProjectsModule,

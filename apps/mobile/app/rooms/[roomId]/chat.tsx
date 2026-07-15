@@ -1,5 +1,5 @@
 import { useMutation } from '@tanstack/react-query';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
 import {
   FlatList,
@@ -28,6 +28,7 @@ interface UiMessage {
  */
 export default function RoomChatScreen() {
   const { roomId } = useLocalSearchParams<{ roomId: string }>();
+  const router = useRouter();
   const [messages, setMessages] = useState<UiMessage[]>([
     {
       id: 'welcome',
@@ -56,6 +57,23 @@ export default function RoomChatScreen() {
       ]);
       if (turn.kind === 'ready-to-generate') {
         setReadyPrompt(turn);
+      }
+    },
+  });
+
+  const generateMutation = useMutation({
+    mutationFn: (structuredPrompt: unknown) =>
+      apiFetch<{ generations: Array<{ id: string }> }>('/generations', {
+        method: 'POST',
+        body: JSON.stringify({ roomId, structuredPrompt, variants: 1 }),
+      }),
+    onSuccess: (result) => {
+      const generation = result.generations[0];
+      if (generation) {
+        router.push({
+          pathname: '/rooms/[roomId]/generation/[generationId]',
+          params: { roomId, generationId: generation.id },
+        });
       }
     },
   });
@@ -123,11 +141,22 @@ export default function RoomChatScreen() {
           )}
         />
 
-        {readyPrompt ? (
+        {readyPrompt?.kind === 'ready-to-generate' ? (
           <View className="border-t border-sand px-5 py-4">
-            <Pressable className="items-center rounded-2xl bg-clay py-4 active:bg-clay-soft">
-              <Text className="font-sans-medium text-base text-paper">Générer le rendu ✦</Text>
+            <Pressable
+              disabled={generateMutation.isPending}
+              onPress={() => generateMutation.mutate(readyPrompt.structuredPrompt)}
+              className="items-center rounded-2xl bg-clay py-4 active:bg-clay-soft disabled:opacity-60"
+            >
+              <Text className="font-sans-medium text-base text-paper">
+                {generateMutation.isPending ? 'Lancement…' : 'Générer le rendu ✦'}
+              </Text>
             </Pressable>
+            {generateMutation.isError ? (
+              <Text className="mt-3 rounded-xl bg-clay-wash px-4 py-3 font-sans text-sm text-clay">
+                Crédits insuffisants ou erreur réseau. Réessayez.
+              </Text>
+            ) : null}
           </View>
         ) : (
           <View className="flex-row items-center gap-2 border-t border-sand px-5 py-3">
