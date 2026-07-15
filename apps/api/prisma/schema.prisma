@@ -1,0 +1,318 @@
+// Kaza data model — mirrors cahier des charges §8.
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum SubscriptionPlan {
+  free
+  premium
+}
+
+enum ProjectType {
+  relooking
+  construction
+}
+
+enum ProjectStatus {
+  draft
+  active
+  archived
+}
+
+enum GenerationStatus {
+  pending
+  processing
+  done
+  failed
+}
+
+enum MessageRole {
+  user
+  assistant
+}
+
+enum TransactionType {
+  credits
+  subscription
+}
+
+enum PaymentChannel {
+  store
+  mobile_money
+}
+
+enum TransactionStatus {
+  pending
+  completed
+  failed
+  refunded
+}
+
+enum AdminRole {
+  super_admin
+  support
+  finance
+  moderator
+}
+
+enum ModerationStatus {
+  pending
+  approved
+  rejected
+}
+
+model User {
+  id           String           @id @default(cuid())
+  email        String?          @unique
+  phone        String?          @unique
+  passwordHash String?
+  displayName  String?
+  language     String           @default("fr")
+  country      String?          @db.Char(2)
+  currency     String           @default("XOF")
+  credits      Int              @default(3)
+  plan         SubscriptionPlan @default(free)
+  suspendedAt  DateTime?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  tasteProfile  TasteProfile?
+  projects      Project[]
+  transactions  Transaction[]
+  refreshTokens RefreshToken[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model OtpCode {
+  id        String   @id @default(cuid())
+  phone     String
+  codeHash  String
+  expiresAt DateTime
+  attempts  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([phone])
+  @@map("otp_codes")
+}
+
+model TasteProfile {
+  userId         String   @id
+  favoriteStyles String[]
+  palette        String[]
+  budgetLevel    String?
+  swipeHistory   Json     @default("[]")
+  updatedAt      DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("taste_profiles")
+}
+
+model Project {
+  id          String        @id @default(cuid())
+  userId      String
+  type        ProjectType
+  name        String
+  status      ProjectStatus @default(draft)
+  currency    String        @default("XOF")
+  totalBudget Int?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  rooms         Room[]
+  conversations Conversation[]
+
+  @@index([userId])
+  @@map("projects")
+}
+
+model Room {
+  id             String   @id @default(cuid())
+  projectId      String
+  type           String
+  name           String
+  sourcePhotoKey String?
+  constraints    String[]
+  createdAt      DateTime @default(now())
+
+  project       Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  generations   Generation[]
+  conversations Conversation[]
+
+  @@index([projectId])
+  @@map("rooms")
+}
+
+model Generation {
+  id                 String           @id @default(cuid())
+  roomId             String
+  version            Int
+  parentGenerationId String?
+  structuredPrompt   Json
+  imageKey           String?
+  status             GenerationStatus @default(pending)
+  failureReason      String?
+  costUsd            Decimal?         @db.Decimal(10, 4)
+  provider           String?
+  createdAt          DateTime         @default(now())
+  completedAt        DateTime?
+
+  room          Room           @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  shoppingItems ShoppingItem[]
+
+  @@index([roomId])
+  @@index([status])
+  @@map("generations")
+}
+
+model Conversation {
+  id        String   @id @default(cuid())
+  roomId    String?
+  projectId String?
+  createdAt DateTime @default(now())
+
+  room     Room?     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  project  Project?  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  messages Message[]
+
+  @@index([roomId])
+  @@index([projectId])
+  @@map("conversations")
+}
+
+model Message {
+  id             String      @id @default(cuid())
+  conversationId String
+  role           MessageRole
+  content        String
+  quickReplies   Json?
+  createdAt      DateTime    @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@map("messages")
+}
+
+model ShoppingItem {
+  id           String  @id @default(cuid())
+  generationId String
+  name         String
+  category     String
+  priceMin     Int
+  priceMax     Int
+  currency     String
+  purchaseUrl  String?
+
+  generation Generation @relation(fields: [generationId], references: [id], onDelete: Cascade)
+
+  @@index([generationId])
+  @@map("shopping_items")
+}
+
+// Parametric construction cost ratios, editable from the back-office (§C5, §G3).
+model CostTable {
+  id          String   @id @default(cuid())
+  country     String   @db.Char(2)
+  workPackage String
+  standing    String
+  pricePerSqm Int
+  currency    String
+  updatedAt   DateTime @updatedAt
+
+  @@unique([country, workPackage, standing])
+  @@map("cost_tables")
+}
+
+model Transaction {
+  id             String            @id @default(cuid())
+  userId         String
+  type           TransactionType
+  amount         Int
+  currency       String
+  channel        PaymentChannel
+  status         TransactionStatus @default(pending)
+  creditsGranted Int?
+  providerRef    String?           @unique
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("transactions")
+}
+
+model AdminUser {
+  id               String    @id @default(cuid())
+  email            String    @unique
+  passwordHash     String
+  displayName      String
+  role             AdminRole
+  twoFactorSecret  String?
+  twoFactorEnabled Boolean   @default(false)
+  createdAt        DateTime  @default(now())
+
+  auditLogs AuditLog[]
+
+  @@map("admin_users")
+}
+
+model AuditLog {
+  id           String   @id @default(cuid())
+  adminId      String
+  action       String
+  targetEntity String
+  targetId     String?
+  details      Json?
+  createdAt    DateTime @default(now())
+
+  admin AdminUser @relation(fields: [adminId], references: [id])
+
+  @@index([adminId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model AppSetting {
+  key         String   @id
+  value       Json
+  environment String   @default("production")
+  updatedAt   DateTime @updatedAt
+
+  @@map("app_settings")
+}
+
+model ModerationItem {
+  id         String           @id @default(cuid())
+  imageKey   String
+  reason     String
+  status     ModerationStatus @default(pending)
+  moderatorId String?
+  decision   String?
+  createdAt  DateTime         @default(now())
+  reviewedAt DateTime?
+
+  @@index([status])
+  @@map("moderation_queue")
+}

@@ -1,0 +1,42 @@
+{
+  "name": "@kaza/api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Kaza REST API — NestJS, consumed by the mobile app and the admin back-office",
+  "scripts": {
+    "build": "nest build",
+    "dev": "nest start --watch",
+    "start": "node dist/main.js",
+    "lint": "eslint src",
+    "typecheck": "tsc --noEmit",
+    "test": "jest",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:studio": "prisma studio"
+  },
+  "dependencies": {
+    "@kaza/shared": "workspace:*",
+    "@nestjs/bullmq": "^11.0.2",
+    "@nestjs/common": "^11.0.12",
+    "@nestjs/config": "^4.0.1",
+    "@nestjs/core": "^11.0.12",
+    "@nestjs/jwt": "^11.0.0",
+    "@nestjs/platform-express": "^11.0.12",
+    "@nestjs/swagger": "^11.0.6",
+    "@prisma/client": "^6.5.0",
+    "bcryptjs": "^3.0.2",
+    "bullmq": "^5.44.0",
+    "ioredis": "^5.6.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^11.0.5",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/express": "^5.0.1",
+    "@types/node": "^22.13.14",
+    "prisma": "^6.5.0",
+    "typescript": "^5.8.3"
+  }
+}
