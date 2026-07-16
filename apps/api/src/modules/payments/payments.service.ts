@@ -1,6 +1,12 @@
-import { BadRequestException, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
 import type { InitiateMobileMoneyPaymentInput } from '@kaza/shared';
 import { PrismaService } from '../../prisma/prisma.service';
+import {
+  type MobileMoneyProvider,
+  type ProviderTransactionStatus,
+} from './providers/mobile-money-provider.interface';
+
+export const MOBILE_MONEY_PROVIDERS = Symbol('MOBILE_MONEY_PROVIDERS');
 
 interface CreditPack {
   id: string;
@@ -19,7 +25,10 @@ const DEFAULT_PACKS: CreditPack[] = [
 export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(MOBILE_MONEY_PROVIDERS) private readonly providers: MobileMoneyProvider[],
+  ) {}
 
   async listPacks(): Promise<CreditPack[]> {
     const setting = await this.prisma.appSetting.findUnique({ where: { key: 'credit-packs' } });
@@ -32,6 +41,7 @@ export class PaymentsService {
     if (!pack) {
       throw new BadRequestException('Unknown credit pack');
     }
+    const provider = this.getProvider(input.provider);
 
     const transaction = await this.prisma.transaction.create({
       data: {
@@ -44,65 +54,98 @@ export class PaymentsService {
       },
     });
 
-    // TODO(F2): create the checkout on FedaPay/KkiaPay and return its payment URL.
-    // Both aggregators are integrated for redundancy (§12).
+    const session = await provider.createCheckout({
+      transactionId: transaction.id,
+      amountXof: pack.priceXof,
+      description: `Kaza — pack ${pack.credits} crédits`,
+      phone: input.phone,
+      callbackUrl: `${process.env.API_BASE_URL}/v1/payments/webhooks/${provider.name}`,
+    });
+
+    await this.prisma.transaction.update({
+      where: { id: transaction.id },
+      data: { providerRef: session.providerRef },
+    });
+
     return {
       transactionId: transaction.id,
-      provider: input.provider,
-      checkoutUrl: null,
+      provider: provider.name,
+      checkoutUrl: session.checkoutUrl,
       status: 'pending',
     };
   }
 
-  async handleWebhook(provider: string, signature: string | undefined, payload: unknown) {
-    this.verifySignature(provider, signature, payload);
-
-    // TODO(F2): parse the provider-specific payload. Expected shape below.
-    const event = payload as { reference?: string; status?: string };
-    if (!event.reference) {
+  /**
+   * Webhook entry point. The payload is only used to find OUR transaction —
+   * the decision to grant credits always comes from a server-to-server status
+   * check with the provider. A forged webhook can therefore never credit.
+   */
+  async handleWebhook(providerName: string, payload: unknown) {
+    const provider = this.getProvider(providerName);
+    const providerRef = this.extractReference(providerName, payload);
+    if (!providerRef) {
       throw new BadRequestException('Missing transaction reference');
     }
 
-    if (event.status === 'approved' || event.status === 'success') {
-      await this.completeTransaction(event.reference);
+    const transaction = await this.prisma.transaction.findFirst({
+      where: { providerRef, status: 'pending' },
+    });
+    if (!transaction) {
+      // Unknown ref or already processed — idempotent no-op.
+      this.logger.warn(`Webhook for unknown or already completed transaction ${providerRef}`);
+      return { received: true };
     }
+
+    const status = await provider.verifyTransaction(providerRef);
+    await this.applyVerifiedStatus(transaction.id, transaction.userId, transaction.creditsGranted, status);
     return { received: true };
   }
 
-  /** Idempotent: a webhook replay must not grant credits twice. */
-  private async completeTransaction(providerRef: string): Promise<void> {
-    const transaction = await this.prisma.transaction.findFirst({
-      where: { OR: [{ id: providerRef }, { providerRef }], status: 'pending' },
-    });
-    if (!transaction) {
-      this.logger.warn(`Webhook for unknown or already completed transaction ${providerRef}`);
-      return;
+  private async applyVerifiedStatus(
+    transactionId: string,
+    userId: string,
+    creditsGranted: number | null,
+    status: ProviderTransactionStatus,
+  ): Promise<void> {
+    if (status === 'approved') {
+      // Conditional update keeps this idempotent even under concurrent webhooks.
+      const updated = await this.prisma.transaction.updateMany({
+        where: { id: transactionId, status: 'pending' },
+        data: { status: 'completed' },
+      });
+      if (updated.count === 1) {
+        await this.prisma.user.update({
+          where: { id: userId },
+          data: { credits: { increment: creditsGranted ?? 0 } },
+        });
+        this.logger.log(`Transaction ${transactionId} completed — ${creditsGranted} credits granted`);
+      }
+    } else if (status === 'declined' || status === 'canceled') {
+      await this.prisma.transaction.updateMany({
+        where: { id: transactionId, status: 'pending' },
+        data: { status: 'failed' },
+      });
     }
-    await this.prisma.$transaction([
-      this.prisma.transaction.update({
-        where: { id: transaction.id },
-        data: { status: 'completed', providerRef },
-      }),
-      this.prisma.user.update({
-        where: { id: transaction.userId },
-        data: { credits: { increment: transaction.creditsGranted ?? 0 } },
-      }),
-    ]);
+    // 'pending': leave as is — a later webhook or reconciliation job will settle it.
   }
 
-  private verifySignature(provider: string, signature: string | undefined, _payload: unknown): void {
-    const secret =
-      provider === 'fedapay' ? process.env.FEDAPAY_SECRET_KEY : process.env.KKIAPAY_SECRET_KEY;
-    if (!secret) {
-      this.logger.warn(`No webhook secret configured for ${provider} — accepting in dev only`);
-      if (process.env.NODE_ENV === 'production') {
-        throw new UnauthorizedException('Webhook secret not configured');
-      }
-      return;
+  private extractReference(providerName: string, payload: unknown): string | null {
+    const body = payload as Record<string, unknown>;
+    if (providerName === 'fedapay') {
+      // FedaPay events wrap the transaction in `entity`.
+      const entity = body?.entity as { id?: number | string } | undefined;
+      return entity?.id != null ? String(entity.id) : null;
     }
-    if (!signature) {
-      throw new UnauthorizedException('Missing webhook signature');
+    // KkiaPay echoes our own transaction id passed to the widget.
+    const ref = body?.transactionId ?? body?.stateData;
+    return ref != null ? String(ref) : null;
+  }
+
+  private getProvider(name: string): MobileMoneyProvider {
+    const provider = this.providers.find((p) => p.name === name);
+    if (!provider) {
+      throw new BadRequestException(`Unknown payment provider: ${name}`);
     }
-    // TODO(F2): verify HMAC per provider documentation.
+    return provider;
   }
 }

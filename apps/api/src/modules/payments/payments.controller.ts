@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, HttpCode, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
   initiateMobileMoneyPaymentSchema,
@@ -34,12 +34,11 @@ export class PaymentsController {
 
   @Post('webhooks/:provider')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Payment provider webhook — grants credits on completion' })
-  webhook(
-    @Param('provider') provider: string,
-    @Headers('x-signature') signature: string | undefined,
-    @Body() payload: unknown,
-  ) {
-    return this.paymentsService.handleWebhook(provider, signature, payload);
+  @ApiOperation({
+    summary:
+      'Payment provider webhook — credits are granted only after a server-to-server status check',
+  })
+  webhook(@Param('provider') provider: string, @Body() payload: unknown) {
+    return this.paymentsService.handleWebhook(provider, payload);
   }
 }

@@ -1,70 +1,125 @@
+import { BadRequestException } from '@nestjs/common';
 import { PaymentsService } from './payments.service';
+import type {
+  MobileMoneyProvider,
+  ProviderTransactionStatus,
+} from './providers/mobile-money-provider.interface';
 
-function buildService(pendingTransaction: object | null) {
+function buildService(options: {
+  pendingTransaction?: object | null;
+  verifiedStatus?: ProviderTransactionStatus;
+}) {
   const prisma = {
     appSetting: { findUnique: jest.fn().mockResolvedValue(null) },
     transaction: {
-      create: jest.fn(),
-      findFirst: jest.fn().mockResolvedValue(pendingTransaction),
+      create: jest.fn().mockResolvedValue({ id: 'tx-1' }),
+      findFirst: jest.fn().mockResolvedValue(options.pendingTransaction ?? null),
       update: jest.fn().mockResolvedValue({}),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
     user: { update: jest.fn().mockResolvedValue({}) },
-    $transaction: jest.fn().mockImplementation((ops: unknown[]) => Promise.all(ops as never)),
   };
-  return { service: new PaymentsService(prisma as never), prisma };
+  const fedapay: MobileMoneyProvider = {
+    name: 'fedapay',
+    createCheckout: jest
+      .fn()
+      .mockResolvedValue({ providerRef: 'fp-123', checkoutUrl: 'https://pay.example/fp-123' }),
+    verifyTransaction: jest.fn().mockResolvedValue(options.verifiedStatus ?? 'approved'),
+  };
+  const service = new PaymentsService(prisma as never, [fedapay]);
+  return { service, prisma, fedapay };
 }
 
-describe('PaymentsService.handleWebhook', () => {
-  const originalEnv = process.env.NODE_ENV;
-  afterEach(() => {
-    process.env.NODE_ENV = originalEnv;
-  });
+describe('PaymentsService.initiateMobileMoneyPayment', () => {
+  it('creates a pending transaction and returns the hosted checkout URL', async () => {
+    const { service, prisma, fedapay } = buildService({});
 
-  it('grants credits exactly once for a pending transaction', async () => {
-    const { service, prisma } = buildService({
-      id: 'tx-1',
-      userId: 'user-1',
-      creditsGranted: 10,
-      status: 'pending',
+    const result = await service.initiateMobileMoneyPayment('user-1', {
+      packId: 'pack-10',
+      provider: 'fedapay',
+      phone: '+22990000000',
     });
 
-    await service.handleWebhook('fedapay', undefined, { reference: 'tx-1', status: 'approved' });
-
-    expect(prisma.transaction.update).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ status: 'completed' }) }),
+    expect(result.checkoutUrl).toBe('https://pay.example/fp-123');
+    expect(fedapay.createCheckout).toHaveBeenCalledWith(
+      expect.objectContaining({ transactionId: 'tx-1', amountXof: 2000 }),
     );
+    expect(prisma.transaction.update).toHaveBeenCalledWith({
+      where: { id: 'tx-1' },
+      data: { providerRef: 'fp-123' },
+    });
+  });
+
+  it('rejects an unknown pack', async () => {
+    const { service } = buildService({});
+
+    await expect(
+      service.initiateMobileMoneyPayment('user-1', {
+        packId: 'nope',
+        provider: 'fedapay',
+        phone: '+22990000000',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
+
+describe('PaymentsService.handleWebhook', () => {
+  const pendingTx = { id: 'tx-1', userId: 'user-1', creditsGranted: 10, status: 'pending' };
+
+  it('grants credits only after server-side verification approves', async () => {
+    const { service, prisma, fedapay } = buildService({
+      pendingTransaction: pendingTx,
+      verifiedStatus: 'approved',
+    });
+
+    await service.handleWebhook('fedapay', { entity: { id: 'fp-123' } });
+
+    expect(fedapay.verifyTransaction).toHaveBeenCalledWith('fp-123');
     expect(prisma.user.update).toHaveBeenCalledWith({
       where: { id: 'user-1' },
       data: { credits: { increment: 10 } },
     });
   });
 
-  it('is idempotent: a replayed webhook does not grant credits twice', async () => {
-    // findFirst filters on status=pending — a completed transaction returns null.
-    const { service, prisma } = buildService(null);
+  it('never credits when the provider says declined — even if the webhook claims success', async () => {
+    const { service, prisma } = buildService({
+      pendingTransaction: pendingTx,
+      verifiedStatus: 'declined',
+    });
 
-    await service.handleWebhook('fedapay', undefined, { reference: 'tx-1', status: 'approved' });
+    // Forged webhook body claiming approval — verification is the only truth.
+    await service.handleWebhook('fedapay', { entity: { id: 'fp-123' }, status: 'approved' });
 
-    expect(prisma.transaction.update).not.toHaveBeenCalled();
+    expect(prisma.user.update).not.toHaveBeenCalled();
+    expect(prisma.transaction.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { status: 'failed' } }),
+    );
+  });
+
+  it('is idempotent: a replayed webhook on a completed transaction does nothing', async () => {
+    const { service, prisma, fedapay } = buildService({ pendingTransaction: null });
+
+    await service.handleWebhook('fedapay', { entity: { id: 'fp-123' } });
+
+    expect(fedapay.verifyTransaction).not.toHaveBeenCalled();
     expect(prisma.user.update).not.toHaveBeenCalled();
   });
 
-  it('ignores non-success statuses', async () => {
-    const { service, prisma } = buildService({ id: 'tx-1', userId: 'user-1', creditsGranted: 10 });
+  it('does not double-credit under concurrent webhooks (conditional update loses the race)', async () => {
+    const { service, prisma } = buildService({
+      pendingTransaction: pendingTx,
+      verifiedStatus: 'approved',
+    });
+    prisma.transaction.updateMany.mockResolvedValue({ count: 0 }); // another webhook won
 
-    await service.handleWebhook('fedapay', undefined, { reference: 'tx-1', status: 'declined' });
+    await service.handleWebhook('fedapay', { entity: { id: 'fp-123' } });
 
     expect(prisma.user.update).not.toHaveBeenCalled();
   });
 
-  it('rejects an unsigned webhook in production when a secret is configured', async () => {
-    process.env.NODE_ENV = 'production';
-    process.env.FEDAPAY_SECRET_KEY = 'secret';
-    const { service } = buildService(null);
+  it('rejects an unknown provider', async () => {
+    const { service } = buildService({});
 
-    await expect(
-      service.handleWebhook('fedapay', undefined, { reference: 'tx-1', status: 'approved' }),
-    ).rejects.toMatchObject({ status: 401 });
-    delete process.env.FEDAPAY_SECRET_KEY;
+    await expect(service.handleWebhook('paypal', {})).rejects.toBeInstanceOf(BadRequestException);
   });
 });

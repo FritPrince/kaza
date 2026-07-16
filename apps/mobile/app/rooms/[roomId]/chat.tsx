@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { AgentTurn, QuickReply } from '@kaza/shared';
-import { apiFetch } from '@/lib/api-client';
+import { apiFetch, ApiError } from '@/lib/api-client';
 
 interface UiMessage {
   id: string;
@@ -74,6 +74,12 @@ export default function RoomChatScreen() {
           pathname: '/rooms/[roomId]/generation/[generationId]',
           params: { roomId, generationId: generation.id },
         });
+      }
+    },
+    onError: (error) => {
+      // Out of credits → soft paywall (F1, §6.7).
+      if (error instanceof ApiError && error.status === 402) {
+        router.push('/paywall');
       }
     },
   });
