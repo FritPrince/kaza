@@ -1,10 +1,34 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import type { SubmitTasteQuizInput, UpdateProfileInput } from '@kaza/shared';
 import { PrismaService } from '../../prisma/prisma.service';
+import { StorageService } from '../storage/storage.service';
+
+interface QuizImageEntry {
+  id: string;
+  styles: string[];
+  imageKey?: string;
+}
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly storage: StorageService,
+  ) {}
+
+  /** Quiz cards for onboarding (A2) — curated via the back-office CMS (G5). */
+  async getTasteQuizImages(): Promise<Array<{ id: string; styles: string[]; imageUrl: string | null }>> {
+    const setting = await this.prisma.appSetting.findUnique({ where: { key: 'taste-quiz-images' } });
+    const catalogue = (setting?.value ?? []) as unknown as QuizImageEntry[];
+    return Promise.all(
+      catalogue.map(async (image) => ({
+        id: image.id,
+        styles: image.styles,
+        // Missing keys (not yet uploaded) degrade to a styled placeholder card client-side.
+        imageUrl: image.imageKey ? await this.storage.getDownloadUrl(image.imageKey).catch(() => null) : null,
+      })),
+    );
+  }
 
   async getProfile(userId: string) {
     const user = await this.prisma.user.findUnique({

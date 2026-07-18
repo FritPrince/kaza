@@ -6,6 +6,10 @@ import { AdminUsersController } from './admin-users.controller';
 import { AdminUsersService } from './admin-users.service';
 import { AdminEconomicsController } from './admin-economics.controller';
 import { AdminEconomicsService } from './admin-economics.service';
+import { AdminModerationController } from './admin-moderation.controller';
+import { AdminModerationService } from './admin-moderation.service';
+import { AdminSettingsController } from './admin-settings.controller';
+import { AdminSettingsService } from './admin-settings.service';
 import { AuditService } from './audit.service';
 import { AdminAuthGuard } from './guards/admin-auth.guard';
 
@@ -16,7 +20,21 @@ import { AdminAuthGuard } from './guards/admin-auth.guard';
       signOptions: { expiresIn: '8h' },
     }),
   ],
-  controllers: [AdminAuthController, AdminUsersController, AdminEconomicsController],
-  providers: [AdminAuthService, AdminUsersService, AdminEconomicsService, AuditService, AdminAuthGuard],
+  controllers: [
+    AdminAuthController,
+    AdminUsersController,
+    AdminEconomicsController,
+    AdminModerationController,
+    AdminSettingsController,
+  ],
+  providers: [
+    AdminAuthService,
+    AdminUsersService,
+    AdminEconomicsService,
+    AdminModerationService,
+    AdminSettingsService,
+    AuditService,
+    AdminAuthGuard,
+  ],
 })
 export class AdminModule {}

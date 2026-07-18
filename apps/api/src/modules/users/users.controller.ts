@@ -35,6 +35,12 @@ export class UsersController {
     return this.usersService.updateProfile(userId, input);
   }
 
+  @Get('me/taste-quiz')
+  @ApiOperation({ summary: 'Quiz cards: curated interior images with style tags (A2)' })
+  getTasteQuizImages() {
+    return this.usersService.getTasteQuizImages();
+  }
+
   @Put('me/taste-quiz')
   @ApiOperation({ summary: 'Submit taste quiz swipes and derive the taste profile (A2)' })
   submitTasteQuiz(

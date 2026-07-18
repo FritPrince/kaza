@@ -42,7 +42,12 @@ export default function PhoneAuthScreen() {
         body: JSON.stringify({ phone: phone.replace(/\s/g, ''), code }),
       });
       await setTokens(tokens);
-      router.replace('/projects');
+      // First sign-in goes through the taste quiz (§6); returning users skip it.
+      const hasProfile = await apiFetch('/users/me/taste-profile').then(
+        () => true,
+        () => false,
+      );
+      router.replace(hasProfile ? '/projects' : '/onboarding/taste-quiz');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Code invalide. Réessayez.');
     } finally {
